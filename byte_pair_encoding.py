@@ -60,7 +60,9 @@ def train_bpe(corpus, vocab_size=50):
             break
 
         # Find most frequent pair
-        best_pair = pairs.most_common(1)[0][0]
+        max_freq = max(pairs.values())
+        candidates = [pair for pair, freq in pairs.items() if freq == max_freq]
+        best_pair = sorted(candidates)[0]  # tie-break alphabetically        
         merges.append(best_pair)
         
         # Merge the pair in all words
