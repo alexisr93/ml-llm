@@ -24,4 +24,7 @@ This repo is intended for:
   A minimal, standalone implementation of a Byte Pair Encoding (BPE) tokenizer. Trains a tokenizer directly on a small corpus and merges character pairs into subword tokens.
 
 - **`bpe_tokenizer_pipeline.py`**  
-  A full BPE tokenizer training pipeline built around the Tiny Shakespeare dataset. Handles corpus download, learning merges, building vocab/token mappings, and preparing tokenized train/validation splits for model training.  
+  A full BPE tokenizer training pipeline built around the Tiny Shakespeare dataset. Handles corpus download, learning merges, building vocab/token mappings, and preparing tokenized train/validation splits for model training.
+
+- **`wordpiece_tokenizer.py`** 
+  Implements a WordPiece subword tokenizer that can be trained on a custom corpus. Provides functionality to encode text into subword tokens using a greedy longest-match-first approach, decode token sequences back to text, save/load the vocabulary, and handles unknown and padding tokens.
