@@ -25,8 +25,3 @@ This repo is intended for:
 
 - **`bpe_tokenizer_pipeline.py`**  
   A full BPE tokenizer training pipeline built around the Tiny Shakespeare dataset. Handles corpus download, learning merges, building vocab/token mappings, and preparing tokenized train/validation splits for model training.  
-
-## License
-
-This repo is licensed under the MIT License. See [LICENSE](LICENSE).
-
