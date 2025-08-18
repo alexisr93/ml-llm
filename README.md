@@ -1,6 +1,6 @@
 # ml-llm
 
-A learning repository focused on exploring **Machine Learning** with an emphasis on **Large Language Models (LLMs)**. This repository will contain Python scripts, and experiments, built primarily using **PyTorch**.
+A learning repository focused on exploring **Machine Learning** with an emphasis on **Large Language Models**. This repository will contain Python scripts, and experiments, built primarily using **PyTorch**.
 
 ## Overview
 
@@ -18,7 +18,15 @@ This repo is intended for:
 - Implement and train small-scale language models using PyTorch.
 - Experiment with model optimization techniques.
 
+## Contents
+
+- **`byte_pair_encoding.py`**  
+  A minimal, standalone implementation of a Byte Pair Encoding (BPE) tokenizer. Trains a tokenizer directly on a small corpus and merges character pairs into subword tokens.
+
+- **`bpe_tokenizer_pipeline.py`**  
+  A full BPE tokenizer training pipeline built around the Tiny Shakespeare dataset. Handles corpus download, learning merges, building vocab/token mappings, and preparing tokenized train/validation splits for model training.  
+
 ## License
 
-This repository is licensed under the MIT License. See [LICENSE](LICENSE) for more information.
+This repo is licensed under the MIT License. See [LICENSE](LICENSE).
 
