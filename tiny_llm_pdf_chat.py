@@ -1,28 +1,11 @@
 #!/usr/bin/env python3
 """
-Tiny PDF-trained Transformer (Byte-level) in PyTorch
+Tiny LLM PDF Chat — Small GPT-style Transformer with BPE tokenizer (PyTorch)
 
-- Trains a very small GPT-style causal LM on text extracted from a single PDF.
-- Byte-level tokenizer (0..255) so it can handle code, symbols, and any language in the PDF.
-- Provides a CLI for training and for a simple chat/code generation REPL.
-
-Quickstart
-----------
-1) Install deps (CPU works; GPU is auto-used if available):
-   pip install torch tqdm pymupdf
-
-2) Train on a PDF (saves model to tiny_llm_pdf_chat.pt by default):
-   python tiny_llm_pdf_chat.py --pdf /path/to/your.pdf --train --steps 2000 --batch-size 32 --block-size 256
-
-3) Chat with the trained model:
-   python tiny_llm_pdf_chat.py --chat --model tiny_llm_pdf_chat.pt --max-new-tokens 128 --temperature 0.9
-
-Notes
------
-- This is intentionally tiny; don't expect miracles. For better results, increase steps and/or model size
-  (n_layer, n_head, n_embd) as your laptop allows.
-- If your PDF is mostly images/scans, text extraction may be poor.
-- You can fine-tune further by rerunning --train with the same --model path.
+- Trains a tiny causal LM on text extracted from a single PDF.
+- Uses a Byte-Pair Encoding (BPE) tokenizer trained on-the-fly from the PDF text.
+- Saves/loads the tokenizer (`tokenizer.json`) so chat works consistently across runs.
+- Provides a simple chat/code generation REPL.
 
 """
 from __future__ import annotations
@@ -30,7 +13,6 @@ import argparse
 import math
 import os
 import sys
-import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -46,43 +28,38 @@ except Exception as e:  # pragma: no cover
     fitz = None
     print("[warning] PyMuPDF not installed. Install with: pip install pymupdf", file=sys.stderr)
 
-# ------------------------------ Tokenizer (Byte-level) ------------------------------
-class ByteTokenizer:
-    """Simple, robust tokenizer over raw bytes (0..255). Works for any text/code."""
-    def __init__(self):
-        self.vocab_size = 256
+# Tokenizers (BPE) + fast wrapper
+try:
+    from tokenizers import Tokenizer
+    from tokenizers.models import BPE
+    from tokenizers.trainers import BpeTrainer
+    from tokenizers.pre_tokenizers import ByteLevel
+except Exception:
+    print("[error] tokenizers not available. Install with: pip install tokenizers", file=sys.stderr)
+    raise
 
-    def encode(self, s: str) -> torch.Tensor:
-        b = s.encode('utf-8', errors='ignore')
-        return torch.tensor(list(b), dtype=torch.long)
+try:
+    from transformers import PreTrainedTokenizerFast
+except Exception:
+    print("[error] transformers not available. Install with: pip install transformers", file=sys.stderr)
+    raise
 
-    def decode(self, ids: torch.Tensor) -> str:
-        # Clamp to byte range and convert back to utf-8 (replace invalids)
-        b = bytes([int(x) & 0xFF for x in ids.tolist()])
-        return b.decode('utf-8', errors='replace')
-
-# ------------------------------ PDF Text Loader ------------------------------
 def extract_text_from_pdf(path: str) -> str:
     if fitz is None:
         raise RuntimeError("PyMuPDF not available. Install with: pip install pymupdf")
     if not os.path.exists(path):
         raise FileNotFoundError(path)
     doc = fitz.open(path)
-    texts = []
-    for page in doc:
-        texts.append(page.get_text("text"))
+    texts = [page.get_text("text") for page in doc]
     doc.close()
     text = "\n".join(texts)
-    # light cleanup
     text = text.replace('\r', '\n')
-    # ensure some chat-friendly prelude helps behavior
     system_seed = (
         "You are a concise assistant trained on the provided document. "
         "Answer with relevant quotes and short explanations when helpful.\n"
     )
     return system_seed + "\n" + text
 
-# ------------------------------ Dataset ------------------------------
 class SequenceDataset(torch.utils.data.Dataset):
     def __init__(self, data: torch.Tensor, block_size: int):
         super().__init__()
@@ -90,17 +67,16 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.block_size = block_size
 
     def __len__(self):
-        return len(self.data) - self.block_size
+        return max(0, len(self.data) - self.block_size)
 
     def __getitem__(self, idx):
         x = self.data[idx: idx + self.block_size]
         y = self.data[idx + 1: idx + 1 + self.block_size]
         return x, y
 
-# ------------------------------ Model ------------------------------
 @dataclass
 class GPTConfig:
-    vocab_size: int = 256
+    vocab_size: int = 256  # will be overridden by tokenizer size
     block_size: int = 256
     n_layer: int = 4
     n_head: int = 4
@@ -120,7 +96,6 @@ class CausalSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-        # causal mask as a registered buffer to avoid re-alloc each forward
         self.register_buffer(
             "mask",
             torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size),
@@ -129,19 +104,18 @@ class CausalSelfAttention(nn.Module):
 
     def forward(self, x):
         B, T, C = x.size()
-        qkv = self.qkv(x)  # (B,T,3C)
+        qkv = self.qkv(x)
         q, k, v = qkv.split(C, dim=2)
 
-        # reshape to heads
-        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)  # (B,nh,T,hd)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
-        att = (q @ k.transpose(-2, -1)) * self.scale  # (B,nh,T,T)
+        att = (q @ k.transpose(-2, -1)) * self.scale
         att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
         att = F.softmax(att, dim=-1)
         att = self.attn_dropout(att)
-        y = att @ v  # (B,nh,T,hd)
+        y = att @ v
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.resid_dropout(self.proj(y))
@@ -225,7 +199,6 @@ class TinyGPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
 
-# ------------------------------ Utilities ------------------------------
 def get_device():
     if torch.cuda.is_available():
         return torch.device('cuda')
@@ -233,12 +206,37 @@ def get_device():
         return torch.device('mps')
     return torch.device('cpu')
 
-# ------------------------------ Training ------------------------------
+def train_and_save_bpe_tokenizer(raw_text: str, vocab_size: int, tok_path: str):
+    """Train a Byte-Level BPE tokenizer on raw_text and save to tok_path (tokenizer.json)."""
+    tmp_txt = "_tmp_pdf_text.txt"
+    with open(tmp_txt, "w", encoding="utf-8") as f:
+        f.write(raw_text)
+
+    trainer = BpeTrainer(
+        vocab_size=vocab_size,
+        min_frequency=2,
+        special_tokens=["<s>", "<pad>", "</s>", "<unk>", "<mask>"],
+    )
+    tok_model = Tokenizer(BPE(unk_token="<unk>"))
+    tok_model.pre_tokenizer = ByteLevel()
+    tok_model.train([tmp_txt], trainer)
+    os.remove(tmp_txt)
+
+    tok_model.save(tok_path)
+
+    # Wrap with HF fast tokenizer for convenience
+    tok = PreTrainedTokenizerFast(
+        tokenizer_file=tok_path,
+        unk_token="<unk>",
+        pad_token="<pad>",
+        bos_token="<s>",
+        eos_token="</s>",
+    )
+    return tok
+
 def train_model(args):
     device = get_device()
     print(f"[info] using device: {device}")
-
-    tok = ByteTokenizer()
 
     if args.pdf:
         print(f"[info] extracting text from {args.pdf}")
@@ -248,9 +246,28 @@ def train_model(args):
     else:
         raise SystemExit("Provide --pdf /path/file.pdf or --text /path/file.txt")
 
-    data = tok.encode(raw_text)
+    # Train tokenizer (or reuse if exists)
+    tok_path = args.tokenizer
+    if not os.path.exists(tok_path):
+        print(f"[info] training BPE tokenizer (vocab_size={args.vocab_size}) → {tok_path}")
+        tok = train_and_save_bpe_tokenizer(raw_text, args.vocab_size, tok_path)
+    else:
+        print(f"[info] loading existing tokenizer from {tok_path}")
+        tok = PreTrainedTokenizerFast(
+            tokenizer_file=tok_path,
+            unk_token="<unk>",
+            pad_token="<pad>",
+            bos_token="<s>",
+            eos_token="</s>",
+        )
+
+    # Encode full corpus
+    data_list = tok.encode(raw_text)              # List[int]
+    data = torch.tensor(data_list, dtype=torch.long)
 
     # split train/val (tiny val split)
+    if len(data) < args.block_size + 2:
+        raise SystemExit("Not enough data after tokenization. Use a longer PDF or reduce --block-size.")
     n = int(0.95 * len(data))
     train_ids = data[:n]
     val_ids = data[n:]
@@ -326,8 +343,7 @@ def train_model(args):
     torch.save(ckpt, args.model)
     print(f"[done] training complete; model saved to {args.model}")
 
-# ------------------------------ Inference / Chat ------------------------------
-def load_model(model_path: str, override_block_size: Optional[int] = None) -> Tuple[TinyGPT, ByteTokenizer, torch.device]:
+def load_model(model_path: str, tokenizer_path: str, override_block_size: Optional[int] = None):
     device = get_device()
     ckpt = torch.load(model_path, map_location=device)
     cfg_dict = ckpt['config']
@@ -338,7 +354,14 @@ def load_model(model_path: str, override_block_size: Optional[int] = None) -> Tu
     model.load_state_dict(ckpt['model_state_dict'])
     model.to(device)
     model.eval()
-    tok = ByteTokenizer()
+
+    tok = PreTrainedTokenizerFast(
+        tokenizer_file=tokenizer_path,
+        unk_token="<unk>",
+        pad_token="<pad>",
+        bos_token="<s>",
+        eos_token="</s>",
+    )
     return model, tok, device
 
 CHAT_SEP = "\n---\n"
@@ -356,7 +379,8 @@ ASSISTANT_TAG = "<assistant>"
 
 def chat_repl(args):
     assert os.path.exists(args.model), f"Model not found: {args.model}"
-    model, tok, device = load_model(args.model, override_block_size=args.block_size)
+    assert os.path.exists(args.tokenizer), f"Tokenizer not found: {args.tokenizer}"
+    model, tok, device = load_model(args.model, args.tokenizer, override_block_size=args.block_size)
 
     convo = SYSTEM_TURN
     print("[info] Chat ready. Type /exit to quit, /reset to clear context.")
@@ -376,14 +400,15 @@ def chat_repl(args):
         convo += f"{USER_TAG}\n{user}\n</user>\n{ASSISTANT_TAG}\n"
 
         # generate
-        idx = tok.encode(convo).unsqueeze(0).to(device)
+        ids = tok.encode(convo)  # List[int]
+        idx = torch.tensor(ids, dtype=torch.long).unsqueeze(0).to(device)
         out_ids = model.generate(
             idx,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
             top_k=args.top_k,
         )[0]
-        out_text = tok.decode(out_ids)
+        out_text = tok.decode(out_ids[0].tolist(), skip_special_tokens=True)
 
         # take only the newly generated part after last assistant tag
         last = out_text.rfind(f"{ASSISTANT_TAG}\n")
@@ -401,14 +426,13 @@ def chat_repl(args):
         print(f"model ◀ {gen.strip()}\n")
         convo += gen + "\n</assistant>\n" + CHAT_SEP
 
-
-# ------------------------------ Main ------------------------------
 def build_argparser():
-    p = argparse.ArgumentParser(description="Tiny PDF-trained Transformer (byte-level)")
+    p = argparse.ArgumentParser(description="Tiny LLM PDF Chat (BPE tokenizer)")
     # I/O
     p.add_argument('--pdf', type=str, default=None, help='Path to a single PDF to train on')
     p.add_argument('--text', type=str, default=None, help='Alternatively, train on plain text file')
     p.add_argument('--model', type=str, default='tiny_llm_pdf_chat.pt', help='Model checkpoint path')
+    p.add_argument('--tokenizer', type=str, default='tokenizer.json', help='Path to save/load BPE tokenizer')
 
     # Model size
     p.add_argument('--n-layer', type=int, default=4)
@@ -424,6 +448,7 @@ def build_argparser():
     p.add_argument('--lr', type=float, default=3e-4)
     p.add_argument('--eval-interval', type=int, default=200)
     p.add_argument('--log-interval', type=int, default=50)
+    p.add_argument('--vocab-size', type=int, default=5000, help='BPE vocab size')
 
     # Inference
     p.add_argument('--chat', action='store_true', help='Launch chat REPL')
