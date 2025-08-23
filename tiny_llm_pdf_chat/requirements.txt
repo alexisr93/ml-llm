@@ -1,0 +1,14 @@
+# Core ML stack
+torch==2.2.2
+numpy<2.0
+tqdm==4.66.4
+
+# PDF text extraction
+pymupdf==1.24.9
+
+# Hugging Face ecosystem
+transformers==4.41.2
+tokenizers==0.19.1
+
+# Optional but useful for some HuggingFace tokenizers
+sentencepiece==0.2.0
