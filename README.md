@@ -30,4 +30,4 @@ A full BPE tokenizer training pipeline built around the Tiny Shakespeare dataset
 Implements a WordPiece subword tokenizer that can be trained on a custom corpus. Provides functionality to encode text into subword tokens using a greedy longest-match-first approach, decode token sequences back to text, save/load the vocabulary, and handles unknown and padding tokens.
 
 - **`single_layer_perceptron.py`**
-A minimal single-neuron perceptron implemented with NumPy. It uses a step activation and the classic perceptron update rule `w += η (y - ŷ) x̄`. Includes an AND/OR demo, works with linearly seprable data.
+A minimal single-neuron perceptron implemented with NumPy. It uses a step activation and the classic perceptron update rule `w += η (y - ŷ) x̄`. Includes an AND/OR demo, works with linearly separable data.
