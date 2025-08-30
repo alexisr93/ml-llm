@@ -3,18 +3,12 @@
 Train a **tiny GPT-style transformer** on the text from a single PDF.
 Uses a **Byte-Pair Encoding (BPE)** tokenizer trained on-the-fly and saved to `tokenizer.json`. This does not produce anything useful for anything other than experimenting.
 
-> **Note:** The examples below use `tiny_llm_pdf_chat.py`. If you renamed the file to `tiny_llm_chat.py`, just swap the filename in the commands.
-
----
-
 ## Features
 
 - **From-scratch tiny Transformer** (few layers/heads; laptop-friendly)
 - **BPE tokenizer** trained directly on your PDF text (saved to `tokenizer.json`)
 - **Chat / code-gen REPL** with temperature & top-k sampling
 - **CPU/MPS/CUDA auto-select** (macOS MPS supported)
-
----
 
 ## Requirements
 
@@ -38,8 +32,6 @@ Install everything:
 pip install -r requirements.txt
 ```
 
----
-
 ## Quickstart
 
 ### 1. Train (tokenizer + model)
@@ -59,8 +51,6 @@ python tiny_llm_pdf_chat.py --chat --model tiny_llm_pdf_chat.pt   --tokenizer to
 
 Type your message.  
 Use `/reset` to clear context, `/exit` to quit.
-
----
 
 ## CLI Options
 
@@ -96,8 +86,6 @@ python tiny_llm_pdf_chat.py [--train] [--chat] [options]
 - `--temperature 0.8`     Sampling randomness  
 - `--top-k N`             Top-k sampling  
 
----
-
 ## How It Works
 
 1. **PDF ingestion** → extracts text with PyMuPDF.  
@@ -105,8 +93,6 @@ python tiny_llm_pdf_chat.py [--train] [--chat] [options]
 3. **Model** → GPT-like causal LM (embedding → Transformer blocks → LM head).  
 4. **Training loop** → teacher-forcing next-token prediction with AdamW.  
 5. **Chat REPL** → formats user/assistant turns and autoregressively generates tokens.  
-
----
 
 ## Tips for Better Results
 
@@ -118,8 +104,6 @@ python tiny_llm_pdf_chat.py [--train] [--chat] [options]
   - Creative: `--temperature 0.9 --top-k 40`  
   - Focused: `--temperature 0.7`  
 
----
-
 ## Project Structure
 
 ```
@@ -128,8 +112,6 @@ tiny_llm_pdf_chat.pt   # trained model (after training)
 tokenizer.json         # trained tokenizer (after training)
 requirements.txt       # dependencies (optional)
 ```
-
----
 
 ## Roadmap
 
