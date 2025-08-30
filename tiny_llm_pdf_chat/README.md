@@ -1,7 +1,7 @@
 # Tiny LLM PDF Chat
 
-Train a **tiny GPT-style transformer** on the text from a **single PDF**, then chat with it.  
-Uses a **Byte-Pair Encoding (BPE)** tokenizer trained on-the-fly and saved to `tokenizer.json` for reproducible inference. This does not produce anything useful for anything other than experimenting.
+Train a **tiny GPT-style transformer** on the text from a single PDF.
+Uses a **Byte-Pair Encoding (BPE)** tokenizer trained on-the-fly and saved to `tokenizer.json`. This does not produce anything useful for anything other than experimenting.
 
 > **Note:** The examples below use `tiny_llm_pdf_chat.py`. If you renamed the file to `tiny_llm_chat.py`, just swap the filename in the commands.
 
